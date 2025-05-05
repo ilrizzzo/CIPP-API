@@ -7,17 +7,17 @@ function Invoke-CIPPStandardStaleEntraDevices {
     .SYNOPSIS
         (Label) Cleanup stale Entra devices
     .DESCRIPTION
-        (Helptext) Cleans up Entra devices that have not connected/signed in for the specified number of days.
-        (DocsDescription) Cleans up Entra devices that have not connected/signed in for the specified number of days. First disables and later deletes the devices. More info can be found in the [Microsoft documentation](https://learn.microsoft.com/en-us/entra/identity/devices/manage-stale-devices)
+        (Helptext) Remediate is currently not available. Cleans up Entra devices that have not connected/signed in for the specified number of days.
+        (DocsDescription) Remediate is currently not available. Cleans up Entra devices that have not connected/signed in for the specified number of days. First disables and later deletes the devices. More info can be found in the [Microsoft documentation](https://learn.microsoft.com/en-us/entra/identity/devices/manage-stale-devices)
     .NOTES
         CAT
             Entra (AAD) Standards
         TAG
             "CIS"
         ADDEDCOMPONENT
-            {"type":"number","name":"standards.StaleEntraDevices.deviceAgeThreshold","label":"Days before stale(Dont set below 30)"}
+            {"type":"number","name":"standards.StaleEntraDevices.deviceAgeThreshold","label":"Days before stale(Do not set below 30)"}
         DISABLEDFEATURES
-            
+            {"report":false,"warn":false,"remediate":true}
         IMPACT
             High Impact
         ADDEDDATE
@@ -38,7 +38,7 @@ function Invoke-CIPPStandardStaleEntraDevices {
     $Date = (Get-Date).AddDays( - [int]$Settings.deviceAgeThreshold)
     $StaleDevices = $AllDevices | Where-Object { $_.approximateLastSignInDateTime -lt $Date }
 
-    If ($Settings.remediate -eq $true) {
+    if ($Settings.remediate -eq $true) {
 
         Write-Host 'Remediation not implemented yet'
         # TODO: Implement remediation. For others in the future that want to try this:
@@ -47,7 +47,7 @@ function Invoke-CIPPStandardStaleEntraDevices {
         # Properties to look at:
         # approximateLastSignInDateTime: For knowing when the device last signed in
         # enrollmentProfileName and operatingSystem: For knowing if it's an AutoPilot device
-        # managementType or isManaged: For knowing if it's an Intune managed device. If it is, should be removed from Intune also. Stale intune standard could prossibly be used for this.
+        # managementType or isManaged: For knowing if it's an Intune managed device. If it is, should be removed from Intune also. Stale intune standard could possibly be used for this.
         # profileType: For knowing if it's only registered or also managed
         # accountEnabled: For knowing if the device is disabled or not
 
@@ -57,7 +57,8 @@ function Invoke-CIPPStandardStaleEntraDevices {
     if ($Settings.alert -eq $true) {
 
         if ($StaleDevices.Count -gt 0) {
-            Write-LogMessage -API 'Standards' -tenant $Tenant -message "$($StaleDevices.Count) Stale devices found" -sev Alert
+            Write-StandardsAlert -message "$($StaleDevices.Count) Stale devices found" -object $StaleDevices -tenant $Tenant -standardName 'StaleEntraDevices' -standardId $Settings.standardId
+            Write-LogMessage -API 'Standards' -tenant $Tenant -message "$($StaleDevices.Count) Stale devices found" -sev Info
         } else {
             Write-LogMessage -API 'Standards' -tenant $Tenant -message 'No stale devices found' -sev Info
         }
@@ -72,5 +73,12 @@ function Invoke-CIPPStandardStaleEntraDevices {
         } else {
             Add-CIPPBPAField -FieldName 'StaleEntraDevices' -FieldValue $true -StoreAs bool -Tenant $Tenant
         }
+
+        if ($StaleDevices.Count -gt 0) {
+            $FieldValue = $StaleDevices | Select-Object -Property displayName, id, approximateLastSignInDateTime, accountEnabled, enrollmentProfileName, operatingSystem, managementType, profileType
+        } else {
+            $FieldValue = $true
+        }
+        Set-CIPPStandardsCompareField -FieldName 'standards.StaleEntraDevices' -FieldValue $FieldValue -Tenant $Tenant
     }
 }

@@ -1,6 +1,6 @@
 using namespace System.Net
 
-Function Invoke-ExecGraphExplorerPreset {
+function Invoke-ExecGraphExplorerPreset {
     <#
     .FUNCTIONALITY
         Entrypoint
@@ -11,16 +11,18 @@ Function Invoke-ExecGraphExplorerPreset {
     param($Request, $TriggerMetadata)
 
     $APIName = $Request.Params.CIPPEndpoint
-    Write-LogMessage -headers $Request.Headers -API $APINAME -message 'Accessed this API' -Sev 'Debug'
+    $Headers = $Request.Headers
+    Write-LogMessage -headers $Headers -API $APIName -message 'Accessed this API' -Sev 'Debug'
     #UNDOREPLACE
-    $Username = ([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($request.headers.'x-ms-client-principal')) | ConvertFrom-Json).userDetails
-    # Write to the Azure Functions log stream.
-    Write-Host 'PowerShell HTTP trigger function processed a request.'
+    $Username = ([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($Headers.'x-ms-client-principal')) | ConvertFrom-Json).userDetails
+
     $Action = $Request.Body.Action ?? ''
+
+    Write-Information ($Request.Body | ConvertTo-Json -Depth 10)
 
     switch ($Action) {
         'Copy' {
-            $Id = $Request.Body.preset.id ?  $Request.Body.preset.id: (New-Guid).Guid
+            $Id = $Request.Body.preset.id ? $Request.Body.preset.id : (New-Guid).Guid
         }
         'Save' {
             $Id = $Request.Body.preset.id
@@ -38,6 +40,32 @@ Function Invoke-ExecGraphExplorerPreset {
 
     if ($params.'$select'.value) {
         $params.'$select' = ($params.'$select').value -join ','
+    }
+
+    if (!$Request.Body.preset.name) {
+        $Message = 'Error: Preset name is required'
+        $StatusCode = [HttpStatusCode]::BadRequest
+        Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+                StatusCode = $StatusCode
+                Body       = @{
+                    Results = $Message
+                    Success = $false
+                }
+            })
+        return
+    }
+
+    if (!$Request.Body.preset.endpoint) {
+        $Message = 'Error: Preset endpoint is required'
+        $StatusCode = [HttpStatusCode]::BadRequest
+        Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+                StatusCode = $StatusCode
+                Body       = @{
+                    Results = $Message
+                    Success = $false
+                }
+            })
+        return
     }
 
     $Preset = [PSCustomObject]@{

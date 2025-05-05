@@ -14,7 +14,7 @@ function Invoke-CIPPStandardAutopilotStatusPage {
             Device Management Standards
         TAG
         DISABLEDFEATURES
-            
+            {"report":true,"warn":true,"remediate":false}
         ADDEDCOMPONENT
             {"type":"number","name":"standards.AutopilotStatusPage.TimeOutInMinutes","label":"Timeout in minutes","defaultValue":60}
             {"type":"textField","name":"standards.AutopilotStatusPage.ErrorMessage","label":"Custom Error Message","required":false}
@@ -36,16 +36,33 @@ function Invoke-CIPPStandardAutopilotStatusPage {
         https://docs.cipp.app/user-documentation/tenant/standards/list-standards/
     #>
     param($Tenant, $Settings)
+
+    # Get current Autopilot enrollment status page configuration
+    try {
+        $CurrentConfig = New-GraphGetRequest -uri "https://graph.microsoft.com/beta/deviceManagement/deviceEnrollmentConfigurations?`$expand=assignments&orderBy=priority&`$filter=deviceEnrollmentConfigurationType eq 'windows10EnrollmentCompletionPageConfiguration' and priority eq 0" -tenantid $Tenant |
+        Select-Object -Property id, displayName, priority, showInstallationProgress, blockDeviceSetupRetryByUser, allowDeviceResetOnInstallFailure, allowLogCollectionOnInstallFailure, customErrorMessage, installProgressTimeoutInMinutes, allowDeviceUseOnInstallFailure, trackInstallProgressForAutopilotOnly
+
+        $StateIsCorrect = ($CurrentConfig.installProgressTimeoutInMinutes -eq $Settings.TimeOutInMinutes) -and
+            ($CurrentConfig.customErrorMessage -eq $Settings.ErrorMessage) -and
+            ($CurrentConfig.showInstallationProgress -eq $Settings.ShowProgress) -and
+            ($CurrentConfig.allowLogCollectionOnInstallFailure -eq $Settings.EnableLog) -and
+            ($CurrentConfig.trackInstallProgressForAutopilotOnly -eq $Settings.OBEEOnly) -and
+            ($CurrentConfig.blockDeviceSetupRetryByUser -eq !$Settings.BlockDevice) -and
+            ($CurrentConfig.allowDeviceResetOnInstallFailure -eq $Settings.AllowReset) -and
+            ($CurrentConfig.allowDeviceUseOnInstallFailure -eq $Settings.AllowFail)
+    } catch {
+        $ErrorMessage = Get-NormalizedError -Message $_.Exception.Message
+        Write-LogMessage -API 'Standards' -tenant $Tenant -message "Failed to check Autopilot Enrollment Status Page: $ErrorMessage" -sev Error
+        $StateIsCorrect = $false
+    }
+
+    # Remediate if the state is not correct
     If ($Settings.remediate -eq $true) {
-        ##$Rerun -Type Standard -Tenant $Tenant -Settings $Settings 'APESP'
-        if ($Rerun -eq $true) {
-            exit 0
-        }
         try {
             $Parameters = @{
                 TenantFilter     = $Tenant
                 ShowProgress     = $Settings.ShowProgress
-                BlockDevice      = $Settings.blockDevice
+                BlockDevice      = $Settings.BlockDevice
                 AllowReset       = $Settings.AllowReset
                 EnableLog        = $Settings.EnableLog
                 ErrorMessage     = $Settings.ErrorMessage
@@ -61,5 +78,20 @@ function Invoke-CIPPStandardAutopilotStatusPage {
         }
     }
 
+    # Report
+    if ($Settings.report -eq $true) {
+        $FieldValue = $StateIsCorrect -eq $true ? $true : $CurrentConfig
+        Set-CIPPStandardsCompareField -FieldName 'standards.AutopilotStatusPage' -FieldValue $FieldValue -TenantFilter $Tenant
+        Add-CIPPBPAField -FieldName 'AutopilotStatusPage' -FieldValue [bool]$StateIsCorrect -StoreAs bool -Tenant $Tenant
+    }
 
+    # Alert
+    if ($Settings.alert -eq $true) {
+        if ($StateIsCorrect -eq $true) {
+            Write-LogMessage -API 'Standards' -tenant $Tenant -message 'Autopilot Enrollment Status Page is configured correctly' -sev Info
+        } else {
+            Write-StandardsAlert -message 'Autopilot Enrollment Status Page settings do not match expected configuration' -object $CurrentConfig -tenant $Tenant -standardName 'AutopilotStatusPage' -standardId $Settings.standardId
+            Write-LogMessage -API 'Standards' -tenant $Tenant -message 'Autopilot Enrollment Status Page settings do not match expected configuration' -sev Info
+        }
+    }
 }
